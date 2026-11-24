@@ -23,12 +23,14 @@ src/qcarchive/
   compare.py              # 两份快照的槽对齐对比 + 原子写出 JSON 差异报告
   builder.py              # 建库器（测试/演示用）
   importer.py             # JSONL 离线建档入口（流式校验/归组/原子提交）
+  vault.py                # 离线备份库：多命名版本、内容寻址去重、租约回收
   cli.py                  # 命令行实现
 scripts/
-  run_query.py            # 查询/对比入口（支持 python -I 直接运行）
+  run_query.py            # 查询/对比/备份库入口（支持 python -I 直接运行）
   make_demo_archives.py   # 生成正常/损坏两个演示档案
 tests/test_query.py       # 17 项查询端到端测试
 tests/test_compare.py     # 20 项对比端到端测试
+tests/test_vault.py       # 20 项备份库端到端测试
 ```
 
 ## 使用
@@ -51,6 +53,11 @@ python -I scripts/run_query.py query demo_data/good_archive \
 # 对比同一设备档案的前后两次快照，生成 JSON 差异报告
 python -I scripts/run_query.py compare demo_data/good_archive demo_data/good_archive \
     --out diff_report.json
+
+# 备份库：多命名版本保存、恢复、删除（首次 save 自动创建库）
+python -I scripts/run_query.py vault save <库目录> 2025-01 <档案目录>
+python -I scripts/run_query.py vault restore <库目录> 2025-01 --out <新档案目录>
+python -I scripts/run_query.py vault forget <库目录> 2025-01
 ```
 
 `import` 的输入目录必须包含 `equipment.jsonl`、`component.jsonl` 和
@@ -73,6 +80,44 @@ python -I scripts/run_query.py compare demo_data/good_archive demo_data/good_arc
 
 退出码（compare）：`0` 对比完成并写出报告；`2` 对比失败（结构不一致或任一页
 不可读/校验失败/无法解释，未创建或替换报告）；`3` 参数错误（如把报告写进输入档案）。
+
+退出码（vault）：`0` 保存/恢复/删除成功；`2` 档案校验失败、版本不存在或重名、
+库内数据缺失/损坏、恢复目标已存在、I/O 失败；`3` 版本名等参数形态错误。
+
+## 备份库（vault）
+
+一个备份库目录可保留多个命名版本（月份）。首次 `save` 创建库骨架，之后重名
+`save` 一律拒绝；`forget` 删除版本记录后允许同名重存。只保存 v1 档案的
+`manifest.json`、`structure.json` 与清单登记的全部页，源档案旁的其他文件不收录。
+保存前用现有清单/结构校验与逐页核验确认档案可恢复，校验不通过的档案不会成为
+版本。
+
+| 要求 | 实现位置 |
+|---|---|
+| 库内字节相同的载荷只留一份，与版本/相对路径无关 | `Vault._publish_staged`：对象名为内容 SHA-256；先流式写暂存文件再 `link`/`replace` 发布 |
+| 同一路径的不同内容不互相替代 | 版本记录 `files: {相对路径: 对象摘要}`，恢复逐路径取对象 |
+| 恢复得到原相对路径、原始字节、可独立使用的档案 | `Vault._restore_payloads`：按清单流式复制 + SHA-256 核对，再复用 compare 读取器整体校验 |
+| 缺失/损坏库内数据不算成功、不留半档、不动已有目标 | 对象缺失/摘要不符/恢复自检失败即抛错；载荷写在目标旁暂存目录，成功后一次 `os.rename` |
+| 备份/恢复不全载荷入内存 | 逐文件、逐块（1 MiB）流式复制；只保留版本清单元数据 |
+| 删除一个版本不损坏其他版本 | 版本记录独立；`forget` 只删自己的记录 |
+| 无引用载荷被回收并可复用 | `_collect_garbage`：删除既无版本引用也无租约引用的对象 |
+| 在途恢复不因并发删除而失败 | 恢复开始时在库锁内写租约 `leases/lease-<id>/objects.json`，回收尊重租约 |
+| 恢复期间其他进程可删除/重写版本 | 恢复只在锁内取版本快照与写租约，复制载荷在锁外进行 |
+| 版本名删除后重用，恢复仍得到开始时选定版本 | 版本记录内容即快照；租约固定其对象摘要，新版本对象不被混入 |
+| 已死进程的租约在下次成功 save/forget 时清理 | `owner.json` 记录 PID 与进程启动时刻，`_prune_dead_leases` 判断进程存活 |
+| 中断后版本呈现操作前/后完整状态 | 版本记录 `os.replace` 原子提交；保存载荷全部落盘后才登记，残留仅为无引用对象 |
+
+库布局：
+
+```
+<库目录>/
+├── vault.json            # 格式标识
+├── vault.lock            # 库级 flock（进程退出自动释放）
+├── versions/v-<id>.json  # 版本记录：名称 + {相对路径: 内容摘要}
+├── objects/<前2位>/<sha256>  # 去重后的文件载荷
+├── leases/lease-<id>/    # 在途恢复的租约（owner.json + objects.json）
+└── tmp/                  # 保存暂存区（带 owner.json）
+```
 
 ## 对比语义与实现
 
@@ -112,6 +157,7 @@ python -I scripts/run_query.py compare demo_data/good_archive demo_data/good_arc
 ```bash
 python -I tests/test_query.py
 python -I tests/test_compare.py
+python -I tests/test_vault.py
 ```
 
 覆盖：命中顺序与坐标、跨检查防凑、空谓词不命中、投影空值保留、空列表实体、

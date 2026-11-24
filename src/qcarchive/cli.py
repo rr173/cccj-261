@@ -5,6 +5,9 @@
   python -m qcarchive.cli query <档案目录> --category 耐压试验 --result 不合格
   python -m qcarchive.cli query <档案目录> ... --format json --out report.json
   python -m qcarchive.cli compare <前档案> <后档案> --out <report.json>
+  python -m qcarchive.cli vault save <库目录> <版本名> <档案目录>
+  python -m qcarchive.cli vault restore <库目录> <版本名> --out <新档案目录>
+  python -m qcarchive.cli vault forget <库目录> <版本名>
 """
 
 from __future__ import annotations
@@ -89,11 +92,28 @@ def main(argv: list[str] | None = None) -> int:
     cmp_p.add_argument("after", help="变更后的档案目录")
     cmp_p.add_argument("--out", help="JSON 报告路径；缺省输出到 stdout")
 
+    vault_p = sub.add_parser(
+        "vault", help="离线备份库：多命名版本保存/恢复/删除")
+    vault_sub = vault_p.add_subparsers(dest="vault_cmd", required=True)
+    vs = vault_sub.add_parser("save", help="把 v1 档案保存为新的命名版本")
+    vs.add_argument("vault_dir", help="备份库目录（不存在时创建）")
+    vs.add_argument("version_name", help="版本名（不能与已有版本重名）")
+    vs.add_argument("archive", help="源 qc-columnar-archive v1 档案目录")
+    vr = vault_sub.add_parser("restore", help="把命名版本恢复为独立档案目录")
+    vr.add_argument("vault_dir", help="备份库目录")
+    vr.add_argument("version_name", help="版本名")
+    vr.add_argument("--out", required=True, help="新档案目录（必须不存在）")
+    vf = vault_sub.add_parser("forget", help="删除命名版本并回收无引用载荷")
+    vf.add_argument("vault_dir", help="备份库目录")
+    vf.add_argument("version_name", help="版本名")
+
     args = parser.parse_args(argv)
     if args.cmd == "import":
         return _run_import(args)
     if args.cmd == "compare":
         return _run_compare(args)
+    if args.cmd == "vault":
+        return _run_vault(args)
     if args.cmd != "query":  # pragma: no cover
         parser.error("仅支持 import / query / compare 子命令")
 
@@ -171,6 +191,43 @@ def _run_compare(args: argparse.Namespace) -> int:
     except OSError as exc:
         print(f"输出失败（对比失败，未生成差异报告）：{exc}", file=sys.stderr)
         return 2
+    return 0
+
+
+def _run_vault(args: argparse.Namespace) -> int:
+    """vault 子命令：save/restore/forget。
+
+    退出码：0 成功；2 档案或备份库数据不可用、校验失败、目标冲突、IO 失败；
+    3 参数形态错误（如空版本名）。
+    """
+    from .errors import ArchiveError
+    from .vault import Vault, VaultError
+
+    try:
+        vault = Vault(args.vault_dir)
+        if args.vault_cmd == "save":
+            vault.save(args.version_name, args.archive)
+        elif args.vault_cmd == "restore":
+            vault.restore(args.version_name, args.out)
+        elif args.vault_cmd == "forget":
+            vault.forget(args.version_name)
+        else:  # pragma: no cover - argparse 已限制
+            raise ValueError(f"未知 vault 子命令：{args.vault_cmd}")
+    except VaultError as exc:  # 先于 ValueError（VaultError 继承自它）
+        print(f"备份库操作失败：{exc}", file=sys.stderr)
+        return 2
+    except ArchiveError as exc:
+        print(f"备份库数据不可用，操作失败：{exc}", file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(f"参数错误：{exc}", file=sys.stderr)
+        return 3
+    except OSError as exc:
+        print(f"备份库操作失败（I/O）：{exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:  # 防御：未预期错误不输出 traceback
+        print(f"备份库操作失败：{type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

@@ -12,6 +12,14 @@ from .importer import (
     import_jsonl_archive,
     import_jsonl_directory,
 )
+from .vault import (
+    Vault,
+    VaultCorruptError,
+    VaultError,
+    forget_version,
+    restore_version,
+    save_version,
+)
 
 __all__ = [
     "ArchiveError",
@@ -31,4 +39,10 @@ __all__ = [
     "import_directory",
     "compare_archives",
     "write_comparison_report",
+    "Vault",
+    "VaultError",
+    "VaultCorruptError",
+    "save_version",
+    "restore_version",
+    "forget_version",
 ]
