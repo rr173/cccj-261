@@ -2,8 +2,9 @@
 """命令行入口脚本（支持 python -I 直接运行）。
 
 用法：
-  python -I scripts/run_query.py <档案目录> --category 耐压试验 --result 不合格
-  python -I scripts/run_query.py <档案目录> ... --format json --out report.json
+  python -I scripts/run_query.py query <档案目录> --category 耐压试验 --result 不合格
+  python -I scripts/run_query.py query <档案目录> ... --format json --out report.json
+  python -I scripts/run_query.py compare <前档案> <后档案> --out report.json
 """
 
 from __future__ import annotations

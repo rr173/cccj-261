@@ -1,8 +1,9 @@
-"""离线查询命令行入口。
+"""离线查询 / 对比命令行入口。
 
 用法：
   python -m qcarchive.cli query <档案目录> --category 耐压试验 --result 不合格
   python -m qcarchive.cli query <档案目录> ... --format json --out report.json
+  python -m qcarchive.cli compare <前档案> <后档案> --out <report.json>
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import json
 import sys
 from pathlib import Path
 
+from .compare import write_comparison_report
 from .errors import ArchiveError
 from .reader import query_archive
 
@@ -68,9 +70,17 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("--format", choices=("text", "json"), default="text")
     q.add_argument("--out", help="输出文件，缺省输出到 stdout")
 
+    cmp_p = sub.add_parser(
+        "compare", help="对比两份快照档案，生成 JSON 差异报告")
+    cmp_p.add_argument("before", help="变更前的档案目录")
+    cmp_p.add_argument("after", help="变更后的档案目录")
+    cmp_p.add_argument("--out", help="JSON 报告路径；缺省输出到 stdout")
+
     args = parser.parse_args(argv)
+    if args.cmd == "compare":
+        return _run_compare(args)
     if args.cmd != "query":  # pragma: no cover
-        parser.error("仅支持 query 子命令")
+        parser.error("仅支持 query / compare 子命令")
 
     try:
         report = query_archive(Path(args.archive), args.category, args.result)
@@ -100,6 +110,22 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(text)
     return exit_code
+
+
+def _run_compare(args: argparse.Namespace) -> int:
+    """compare 子命令：任何页不可用即退出码 2，且不创建/替换目标报告。"""
+    try:
+        write_comparison_report(args.before, args.after, args.out)
+    except ValueError as exc:
+        print(f"参数错误：{exc}", file=sys.stderr)
+        return 3
+    except ArchiveError as exc:
+        print(f"档案错误（对比失败，未生成差异报告）：{exc}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f"输出失败（对比失败，未生成差异报告）：{exc}", file=sys.stderr)
+        return 2
+    return 0
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from .errors import ArchiveError, ProjectionPageError
 from .models import Hit, PageRef, QueryReport, ReadRecord, Structure
 from .reader import GatedPageReader, query_archive
 from .builder import ArchiveBuilder
+from .compare import compare_archives, write_comparison_report
 
 __all__ = [
     "ArchiveError",
@@ -16,4 +17,6 @@ __all__ = [
     "GatedPageReader",
     "query_archive",
     "ArchiveBuilder",
+    "compare_archives",
+    "write_comparison_report",
 ]
