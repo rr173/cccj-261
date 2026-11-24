@@ -5,6 +5,13 @@ from .models import Hit, PageRef, QueryReport, ReadRecord, Structure
 from .reader import GatedPageReader, query_archive
 from .builder import ArchiveBuilder
 from .compare import compare_archives, write_comparison_report
+from .importer import (
+    ArchiveImportError,
+    import_archive,
+    import_directory,
+    import_jsonl_archive,
+    import_jsonl_directory,
+)
 
 __all__ = [
     "ArchiveError",
@@ -17,6 +24,11 @@ __all__ = [
     "GatedPageReader",
     "query_archive",
     "ArchiveBuilder",
+    "ArchiveImportError",
+    "import_jsonl_archive",
+    "import_jsonl_directory",
+    "import_archive",
+    "import_directory",
     "compare_archives",
     "write_comparison_report",
 ]

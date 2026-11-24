@@ -1,6 +1,7 @@
 """离线查询 / 对比命令行入口。
 
 用法：
+  python -m qcarchive.cli import <JSONL 输入目录> --out <档案目录>
   python -m qcarchive.cli query <档案目录> --category 耐压试验 --result 不合格
   python -m qcarchive.cli query <档案目录> ... --format json --out report.json
   python -m qcarchive.cli compare <前档案> <后档案> --out <report.json>
@@ -70,6 +71,18 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("--format", choices=("text", "json"), default="text")
     q.add_argument("--out", help="输出文件，缺省输出到 stdout")
 
+    import_p = sub.add_parser(
+        "import",
+        help="把含 equipment/component/inspection 三份 JSONL 的目录建档为 v1 档案")
+    import_p.add_argument("input_dir", help="包含三份 UTF-8 JSONL 的输入目录")
+    import_p.add_argument("--out", required=True, help="生成的 qc-columnar-archive v1 目录")
+    import_p.add_argument(
+        "--page-size", type=int, default=None,
+        help=argparse.SUPPRESS)
+    import_p.add_argument(
+        "--no-replace-existing", action="store_true",
+        help=argparse.SUPPRESS)
+
     cmp_p = sub.add_parser(
         "compare", help="对比两份快照档案，生成 JSON 差异报告")
     cmp_p.add_argument("before", help="变更前的档案目录")
@@ -77,10 +90,12 @@ def main(argv: list[str] | None = None) -> int:
     cmp_p.add_argument("--out", help="JSON 报告路径；缺省输出到 stdout")
 
     args = parser.parse_args(argv)
+    if args.cmd == "import":
+        return _run_import(args)
     if args.cmd == "compare":
         return _run_compare(args)
     if args.cmd != "query":  # pragma: no cover
-        parser.error("仅支持 query / compare 子命令")
+        parser.error("仅支持 import / query / compare 子命令")
 
     try:
         report = query_archive(Path(args.archive), args.category, args.result)
@@ -110,6 +125,37 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(text)
     return exit_code
+
+
+def _run_import(args: argparse.Namespace) -> int:
+    """import 子命令：校验 JSONL 并原子生成 v1 档案。"""
+    from .importer import (
+        DEFAULT_PAGE_SIZE,
+        ArchiveImportError,
+        import_jsonl_archive,
+    )
+
+    try:
+        import_jsonl_archive(
+            args.input_dir,
+            args.out,
+            page_size=(DEFAULT_PAGE_SIZE if args.page_size is None
+                       else args.page_size),
+            replace_existing=not args.no_replace_existing,
+        )
+    except ArchiveImportError as exc:
+        print(f"建档失败：{exc}", file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(f"参数错误：{exc}", file=sys.stderr)
+        return 3
+    except OSError as exc:
+        print(f"建档输出失败：{exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:  # 防御：任何未预期错误也不输出 traceback 到 stdout
+        print(f"建档失败：{type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def _run_compare(args: argparse.Namespace) -> int:

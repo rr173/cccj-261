@@ -22,6 +22,7 @@ src/qcarchive/
   reader.py               # 带闸门读取器 + 流式谓词扫描 + 投影按需读取（查询引擎）
   compare.py              # 两份快照的槽对齐对比 + 原子写出 JSON 差异报告
   builder.py              # 建库器（测试/演示用）
+  importer.py             # JSONL 离线建档入口（流式校验/归组/原子提交）
   cli.py                  # 命令行实现
 scripts/
   run_query.py            # 查询/对比入口（支持 python -I 直接运行）
@@ -33,6 +34,9 @@ tests/test_compare.py     # 20 项对比端到端测试
 ## 使用
 
 ```bash
+# 从现场导出的三份 JSONL 离线建档
+python -I scripts/run_query.py import <JSONL 输入目录> --out <档案目录>
+
 # 建演示档案（输出到独立数据目录，与代码目录分离）
 python -I scripts/make_demo_archives.py demo_data
 
@@ -49,8 +53,23 @@ python -I scripts/run_query.py compare demo_data/good_archive demo_data/good_arc
     --out diff_report.json
 ```
 
+`import` 的输入目录必须包含 `equipment.jsonl`、`component.jsonl` 和
+`inspection.jsonl`。标识在各自文件内必须唯一，`component.equipment_id` 与
+`inspection.component_id` 必须能解析到已有记录。导入按“设备行序 → 部件行序 →
+检查行序”稳定归组：同一设备的部件按部件文件行号排列，同一部件的检查按检查文件
+行号排列；因此部件改挂设备后，检查值仍跟随原部件，不会与其他记录错位。显式
+`null` 原样写入列槽。
+
+导入逐行流式校验，标识和行偏移使用临时 SQLite 计划库，列页按固定页数写出；
+产物先写入目标旁的暂存目录并复用现有对比引擎校验全部页，成功后才提交。源数据
+错误会指出文件名和行号，且不会在 `--out` 生成半成品；若 `--out` 已是档案，
+校验/建档阶段失败时原档案保持不变。
+
 退出码（query）：`0` 正常（含部分不可交付）；`2` 档案错误（结构/清单/谓词页不可用，
 无命中交付）；`3` 查询参数错误。
+
+退出码（import）：`0` 建档成功；`2` 输入数据、所属关系或输出/档案校验失败；
+`3` 命令参数错误。
 
 退出码（compare）：`0` 对比完成并写出报告；`2` 对比失败（结构不一致或任一页
 不可读/校验失败/无法解释，未创建或替换报告）；`3` 参数错误（如把报告写进输入档案）。
