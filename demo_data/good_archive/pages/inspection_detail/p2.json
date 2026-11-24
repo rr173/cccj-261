@@ -1,0 +1,10 @@
+{
+  "page_id": "p2",
+  "column": "inspection_detail",
+  "slot_start": 4,
+  "slot_end": 6,
+  "values": [
+    "接头处可见渗漏",
+    "绝缘电阻1200MΩ"
+  ]
+}

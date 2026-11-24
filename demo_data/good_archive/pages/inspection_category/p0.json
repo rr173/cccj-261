@@ -1,0 +1,11 @@
+{
+  "page_id": "p0",
+  "column": "inspection_category",
+  "slot_start": 0,
+  "slot_end": 3,
+  "values": [
+    "耐压试验",
+    "外观检查",
+    "耐压试验"
+  ]
+}

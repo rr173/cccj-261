@@ -1,0 +1,11 @@
+{
+  "page_id": "p1",
+  "column": "inspection_detail",
+  "slot_start": 2,
+  "slot_end": 4,
+  "values": [
+    "保压18分钟压力下降0.4MPa",
+    "记录表漏填结果"
+  ]
+}
+<<tampered>>

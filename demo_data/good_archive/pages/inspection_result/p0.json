@@ -1,0 +1,13 @@
+{
+  "page_id": "p0",
+  "column": "inspection_result",
+  "slot_start": 0,
+  "slot_end": 5,
+  "values": [
+    "合格",
+    "不合格",
+    "不合格",
+    null,
+    "不合格"
+  ]
+}

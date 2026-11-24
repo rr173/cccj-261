@@ -1,0 +1,106 @@
+"""离线查询命令行入口。
+
+用法：
+  python -m qcarchive.cli query <档案目录> --category 耐压试验 --result 不合格
+  python -m qcarchive.cli query <档案目录> ... --format json --out report.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from .errors import ArchiveError
+from .reader import query_archive
+
+
+def _render_text(report_dict: dict) -> str:
+    lines: list[str] = []
+    lines.append(f"档案：{report_dict['archive_path']}")
+    lines.append(f"查询：类别={report_dict['category']!r} 且 结果={report_dict['result']!r}")
+    if report_dict["archive_error"]:
+        lines.append(f"档案错误（无命中交付）：{report_dict['archive_error']}")
+        return "\n".join(lines)
+    lines.append(
+        f"命中 {len(report_dict['hits'])} 条"
+        f"（可交付 {report_dict['delivered_count']}，"
+        f"不可交付 {report_dict['undeliverable_count']}）")
+    for i, h in enumerate(report_dict["hits"], 1):
+        coord = (f"设备{h['equipment_ordinal']} / 部件{h['component_ordinal_in_equipment']}"
+                 f" / 检查{h['inspection_ordinal_in_component']}"
+                 f"（槽 e={h['equipment_slot']}, c={h['component_slot']}, "
+                 f"i={h['inspection_slot']}）")
+        lines.append(f"  [{i}] {coord}  状态={h['status']}")
+        lines.append(f"      类别={h['category']!r}  结果={h['result']!r}")
+        if h["status"] == "delivered":
+            lines.append(f"      部件备注={h['component_remark']!r}")
+            lines.append(f"      检查明细={h['detail']!r}")
+        else:
+            for mp in h["missing_pages"]:
+                lines.append(
+                    f"      不可交付载荷：列={mp['column']} 页={mp['page_id']} "
+                    f"路径={mp['path']} 槽区间=[{mp['slot_start']},{mp['slot_end']}) "
+                    f"原因={mp['reason']}")
+
+    lines.append("")
+    lines.append(f"实际载荷读页记录（共 {len(report_dict['payload_reads'])} 次）：")
+    for r in report_dict["payload_reads"]:
+        lines.append(
+            f"  - {r['phase']:<10} 列={r['column']:<20} 页={r['page_id']} "
+            f"槽=[{r['slot_start']},{r['slot_end']}) 状态={r['status']} "
+            f"字节={r['bytes_read']}")
+        lines.append(f"      原因：{r['reason']}")
+        if r["error"]:
+            lines.append(f"      错误：{r['error']}")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="qcarchive", description="qc-columnar-archive 离线查询入口")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    q = sub.add_parser("query", help="按类别+结果查询同槽检查命中")
+    q.add_argument("archive", help="档案目录")
+    q.add_argument("--category", required=True, help="类别非空字面值")
+    q.add_argument("--result", required=True, help="结果非空字面值")
+    q.add_argument("--format", choices=("text", "json"), default="text")
+    q.add_argument("--out", help="输出文件，缺省输出到 stdout")
+
+    args = parser.parse_args(argv)
+    if args.cmd != "query":  # pragma: no cover
+        parser.error("仅支持 query 子命令")
+
+    try:
+        report = query_archive(Path(args.archive), args.category, args.result)
+        report_dict = report.to_dict()
+    except ArchiveError as exc:
+        report_dict = {
+            "category": args.category,
+            "result": args.result,
+            "archive_path": str(Path(args.archive)),
+            "archive_error": str(exc),
+            "delivered_count": 0,
+            "undeliverable_count": 0,
+            "hits": [],
+            "payload_reads": [],
+        }
+        exit_code = 2
+    except ValueError as exc:
+        print(f"参数错误：{exc}", file=sys.stderr)
+        return 3
+    else:
+        exit_code = 0
+
+    text = (json.dumps(report_dict, ensure_ascii=False, indent=2)
+            if args.format == "json" else _render_text(report_dict))
+    if args.out:
+        Path(args.out).write_text(text + "\n", encoding="utf-8")
+    else:
+        print(text)
+    return exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
